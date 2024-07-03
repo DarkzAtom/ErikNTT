@@ -10,18 +10,20 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.support import expected_conditions as EC
 from anticaptchaofficial.imagecaptcha import *
 import sys
+from flask import Flask, render_template, request, redirect, url_for, jsonify
+import threading
 
 
 # THE SECTION WITH THE QUERY PARAMS IS HERE
 # **********************************************************
 
-TT_LINK = "https://www.tiktok.com/@crawly_possessed/video/7385326325285817633"
+TT_LINK = ""
 # don't forget to keep the right format of the link, with https:// at the beginning
 
-TT_USERNAME = "@greg_757"
+TT_USERNAME = ""
 # PROVIDE USERNAME WITH @! Here I left the @ on purpose as a reminder, that you should look for account's @ (usernameid), which is above their account's name that can be whatever they want, so you should be careful. It looks bolder and bigger in font as well. on the site exactly the @'s are shown. I guess you understand all of that, but just in case I left this short instruction if the script is passed for usage to someone else
 
-ROUNDS = 3
+ROUNDS = 0
 # This param is for how much time you want to boost likes for a comment
 # The average for one boosting is 70-90, you might know better so in case i'm wrong correct me
 
@@ -31,6 +33,8 @@ SHOW_BROWSER_INSTANCE_OR_NOT = True
 
 # ****************************************************
 # THE END OF THE QUERY PARAMS SECTION
+
+
 
 
 class SlowDownException(Exception):
@@ -81,44 +85,63 @@ def solve_captcha(driver):
 
 
 def countdown_and_proceed(driver, btn_sbt, i):
-    driver.implicitly_wait(5)
-    if i >= 1:
+    while True:
+        driver.implicitly_wait(5)
+        if i >= 1:
+            try:
+                success_sent_likes = WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.XPATH, '//span[contains(text(), "Comment hearts successfully sent.")]')))
+                print('Likes have been successfuly sent')
+                time.sleep(2)
+            except:
+                print("Seems like we haven't achieved success in sending likes, or the script just can't detect the line approving that we sent them.\n Anyway, the script keeps going")
+                pass
         try:
-            success_sent_likes = WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.XPATH, '//span[contains(text(), "Comment hearts successfully sent.")]')))
-            print('Likes have been successfuly sent')
-            time.sleep(2)
+            countdown_before_proceeding = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'span.br.c-hearts-countdown'))).text
+
+            seconds_cd = None
+            minutes_cd = None
+
+            splited_cd = countdown_before_proceeding.strip().split(' ')
+
+            for index, cd_item in enumerate(splited_cd):
+                if "second" in cd_item:
+                    seconds_cd = splited_cd[index - 1]
+                if "minute" in cd_item:
+                    minutes_cd = splited_cd[index - 1]
+
+            print(countdown_before_proceeding)
+
+            print(f'Minutes: {minutes_cd}')
+            print(f'Seconds: {seconds_cd}')
+
+            time_cd_sec = int(minutes_cd) * 60 + int(seconds_cd) + 1.5
+            time.sleep(time_cd_sec)
+
+            btn_sbt.click()
+
+            try:
+                countdown_before_proceeding_control = WebDriverWait(driver, 5).until(
+                    EC.visibility_of_element_located((By.CSS_SELECTOR, 'span.br.c-hearts-countdown'))).text
+                continue
+            except:
+                pass
+
+
         except:
-            print("Seems like we haven't achieved success in sending likes, or the script just can't detect the line approving that we sent them.\n Anyway, the script keeps going")
+            print('There was not a timer')
             pass
-    try:
-        countdown_before_proceeding = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'span.br.c-hearts-countdown'))).text
 
-        seconds_cd = None
-        minutes_cd = None
+        btn_to_proceed = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.XPATH, '//*[@id="c2VuZC9mb2xsb3dlcnNfdGlrdG9r"]/div[1]/div/form/button')))
+        btn_to_proceed.click()
 
-        splited_cd = countdown_before_proceeding.strip().split(' ')
+        try:
+            countdown_before_proceeding_control = WebDriverWait(driver, 5).until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'span.br.c-hearts-countdown'))).text
+            continue
+        except:
+            pass
 
-        for index, cd_item in enumerate(splited_cd):
-            if "second" in cd_item:
-                seconds_cd = splited_cd[index - 1]
-            if "minute" in cd_item:
-                minutes_cd = splited_cd[index - 1]
+        break
 
-        print(countdown_before_proceeding)
-
-        print(f'Minutes: {minutes_cd}')
-        print(f'Seconds: {seconds_cd}')
-
-        time_cd_sec = int(minutes_cd) * 60 + int(seconds_cd) + 1.5
-        time.sleep(time_cd_sec)
-
-        btn_sbt.click()
-    except:
-        print('There was not a timer')
-        pass
-
-    btn_to_proceed = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.XPATH, '//*[@id="c2VuZC9mb2xsb3dlcnNfdGlrdG9r"]/div[1]/div/form/button')))
-    btn_to_proceed.click()
 
 
 def locate_comment_and_like(driver, TT_USERNAME):
@@ -159,6 +182,7 @@ def locate_comment_and_like(driver, TT_USERNAME):
 
 
 def main():
+    global TT_LINK, TT_USERNAME, ROUNDS, SHOW_BROWSER_INSTANCE_OR_NOT
     driver = None
     try:
         while True:
@@ -264,9 +288,93 @@ def main():
             driver.quit()
 
 
-if __name__ == '__main__':
-    main()
+app = Flask(__name__)
 
+tasks = {}
+task_counter = 0
+tasks_lock = threading.Lock()
+
+
+def run_task(task_id):
+    global TT_LINK, TT_USERNAME, ROUNDS, SHOW_BROWSER_INSTANCE_OR_NOT
+    task = tasks[task_id]
+    TT_LINK = task['link']
+    TT_USERNAME = task['username']
+    ROUNDS = task['rounds']
+    SHOW_BROWSER_INSTANCE_OR_NOT = task['show_browser_instance']
+
+    # Run the main script in a separate thread
+    def task_execution():
+        main()
+
+    thread = threading.Thread(target=task_execution)
+    thread.start()
+
+    # Wait for 1.5 seconds before removing the task from the list
+    time.sleep(1.5)
+    with tasks_lock:
+        tasks.pop(task_id, None)
+
+
+@app.route('/')
+def index():
+    with tasks_lock:
+        active_tasks = {task_id: details for task_id, details in tasks.items()}
+    return render_template("index.html", tasks=active_tasks)
+
+
+@app.route('/prepare', methods=['POST'])
+def prepare():
+    global task_counter
+    tt_link = request.form['tt_link']
+    tt_username = request.form['tt_username']
+    rounds = int(request.form['rounds'])
+    show_browser_instance = request.form.get('show_browser_instance') == 'on'
+
+    with tasks_lock:
+        task_id = task_counter
+        task_counter += 1
+        tasks[task_id] = {
+            'username': tt_username,
+            'link': tt_link,
+            'rounds': rounds,
+            'show_browser_instance': show_browser_instance
+        }
+
+    return redirect(url_for('index'))
+
+
+@app.route('/run/<int:task_id>')
+def run(task_id):
+    thread = threading.Thread(target=run_task, args=(task_id,))
+    thread.start()
+    return jsonify(success=True)
+
+
+@app.route('/run_all')
+def run_all():
+    with tasks_lock:
+        for task_id in list(tasks.keys()):
+            thread = threading.Thread(target=run_task, args=(task_id,))
+            thread.start()
+    return jsonify(success=True)
+
+
+@app.route('/delete/<int:task_id>')
+def delete(task_id):
+    with tasks_lock:
+        tasks.pop(task_id, None)
+    return redirect(url_for('index'))
+
+
+@app.route('/tasks')
+def get_tasks():
+    with tasks_lock:
+        return jsonify(tasks)
+
+
+if __name__ == '__main__':
+    app.run(debug=True)
 
 
 
